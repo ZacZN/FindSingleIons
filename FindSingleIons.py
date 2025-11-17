@@ -107,7 +107,7 @@ def main():
             xx=xx_orig,
             yy=yy_orig,
             zz=zz_orig,
-            yy_idx=nframes-(sframes+1)
+            yy_idx=nframes-(sframes+2)
         )
 
         xx_avg, yy_avg, zz_avg = tools.get_averaged_spectrogram(
