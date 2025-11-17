@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from iqtools import plotters, tools
 import os
 import toml
+import logging
 
 
 # Load the config file
@@ -24,6 +25,12 @@ avg_every = config["settings"]["avg_every"]
 whole_region_start = config["settings"]["whole_region_start"]
 whole_region_end = config["settings"]["whole_region_end"]
 peak_criterion = config["settings"]["peak_criterion"]
+set_logging = config["settings"]["set_logging"]
+
+if set_logging.lower() == "true":
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(level=logging.INFO)
+
 
 
 # Returns a list of files in the filepath
@@ -48,7 +55,11 @@ def get_slices():
 def load_file(file_list: list, file_index: int, sly: slice, slx: slice):
     file = file_path + file_list[file_index]
     iq = tools.get_iq_object(file)
-    nframes = int((iq.nsamples_total/iq.fs)/(lframes/iq.fs))
+
+    logger.info(f"File: {file_list[file_index]}")
+    logger.info(f"Total samples: {iq.nsamples_total}")
+
+    #nframes = int((iq.nsamples_total/iq.fs)/(lframes/iq.fs))
     
     iq.read(
         nframes=nframes,
