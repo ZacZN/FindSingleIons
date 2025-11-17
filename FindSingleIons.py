@@ -66,7 +66,7 @@ def load_file(file_list: list, file_index: int, sly: slice, slx: slice):
     #nframes = int((iq.nsamples_total/iq.fs)/(lframes/iq.fs))
     
     iq.read(
-        nframes=nframes,
+        nframes=nframes-sframes,
         lframes=lframes,
         sframes=sframes
     )
