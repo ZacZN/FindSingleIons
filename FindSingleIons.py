@@ -58,6 +58,10 @@ def load_file(file_list: list, file_index: int, sly: slice, slx: slice):
 
     logger.info(f"File: {file_list[file_index]}")
     logger.info(f"Total samples: {iq.nsamples_total}")
+    logger.info(f"LFRAMES: {lframes}")
+    logger.info(f"NFRAMES: {nframes}")
+    logger.info(f"Total requested samples: {lframes*nframes}")
+    logger.info(f"SFRAMES {sframes}")
 
     #nframes = int((iq.nsamples_total/iq.fs)/(lframes/iq.fs))
     
