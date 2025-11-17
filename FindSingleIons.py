@@ -103,6 +103,10 @@ def main():
             slx=slx
         )
 
+        logger.info(f"xx_orig shape: {np.shape(xx_orig)}")
+        logger.info(f"yy_orig shape: {np.shape(yy_orig)}")
+        logger.info(f"zz_orig shape: {np.shape(zz_orig)}")
+
         xx_cooled, yy_cooled, zz_cooled = tools.get_cooled_spectrogram(
             xx=xx_orig,
             yy=yy_orig,
@@ -110,12 +114,20 @@ def main():
             yy_idx=nframes-(sframes+2)
         )
 
+        logger.info(f"xx_cooled shape: {np.shape(xx_cooled)}")
+        logger.info(f"yy_cooled shape: {np.shape(yy_cooled)}")
+        logger.info(f"zz_cooled shape: {np.shape(zz_cooled)}")
+
         xx_avg, yy_avg, zz_avg = tools.get_averaged_spectrogram(
             xx=xx_cooled,
             yy=yy_cooled,
             zz=zz_cooled,
             every=avg_every
         )
+
+        logger.info(f"xx_avg shape: {np.shape(xx_avg)}")
+        logger.info(f"yy_avg shape: {np.shape(yy_avg)}")
+        logger.info(f"zz_avg shape: {np.shape(zz_avg)}")
 
         zz_sum = np.zeros(np.shape(xx_avg)[1])
         for i in range(len(zz_avg)):
