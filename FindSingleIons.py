@@ -4,11 +4,14 @@ from iqtools import plotters, tools
 import os
 import toml
 import logging
+import time
 
 
 # Load the config file
 with open("config.toml", "r") as f:
     config = toml.load(f)
+
+print(config["settings"])
 
 # Load settings from config
 file_path = config["settings"]["file_path"]
@@ -27,14 +30,9 @@ whole_region_end = config["settings"]["whole_region_end"]
 peak_criterion = config["settings"]["peak_criterion"]
 set_logging = config["settings"]["set_logging"]
 
-if set_logging.lower() == "true":
-    logger = logging.getLogger(__name__)
-    logging.basicConfig(level=logging.INFO)
-
-
 
 # Returns a list of files in the filepath
-def get_files():
+def get_files() -> list:
     datafiles = os.listdir(path=file_path)
     sorted_files = sorted(datafiles)
 
@@ -42,28 +40,20 @@ def get_files():
 
 
 # Return x and y slices for zooming into the spectrogram
-def get_slices():
-    sly = slice(0, nframes-(sframes+1))
+def get_2d_slices() -> tuple:
+    sly = slice(0, nframes-(sframes))
     slx = slice(int(lframes*whole_region_start), int(lframes*whole_region_end))
 
     return sly, slx
 
 
 # Read in the data and get spectrogram based on parameters specified in the config file
-# Returns xx, yy, zz of spectrogram sliced to zoom in on the region of interest according 
-# to the config
-def load_file(file_list: list, file_index: int, sly: slice, slx: slice):
+# Returns xx, yy, zz and filename of spectrogram
+def load_file(file_list: list, file_index: int) -> tuple:
     file = file_path + file_list[file_index]
     iq = tools.get_iq_object(file)
 
-    logger.info(f"File: {file_list[file_index]}")
-    logger.info(f"Total samples: {iq.nsamples_total}")
-    logger.info(f"LFRAMES: {lframes}")
-    logger.info(f"NFRAMES: {nframes}")
-    logger.info(f"Total requested samples: {lframes*nframes}")
-    logger.info(f"SFRAMES {sframes}")
-
-    #nframes = int((iq.nsamples_total/iq.fs)/(lframes/iq.fs))
+    print(f"Total Samples: {iq.nsamples_total}")
     
     iq.read(
         nframes=nframes-sframes,
@@ -80,80 +70,160 @@ def load_file(file_list: list, file_index: int, sly: slice, slx: slice):
         sparse=False
     )
 
-    return xx[sly,slx], yy[sly,slx], zz[sly,slx], file_list[file_index]
+    filename = file_list[file_index]
+
+    return xx, yy, zz, filename
 
 
+# Takes the original xx, yy, zz from the loaded file then cools, averages, and
+# cuts the frequency range to that specified in the config file
+def process_spectrograms(xx: np.ndarray, yy: np.ndarray, zz: np.ndarray, sly: slice, slx: slice ) -> tuple: 
+    xx_cooled, yy_cooled, zz_cooled = tools.get_cooled_spectrogram(
+        xx=xx,
+        yy=yy,
+        zz=zz,
+        yy_idx=nframes-(sframes+1)
+    )
+
+    xx_cooled_cut, yy_cooled_cut, zz_cooled_cut = xx_cooled[sly,slx], yy_cooled[sly,slx], zz_cooled[sly,slx]
+
+    xx_avg, yy_avg, zz_avg = tools.get_averaged_spectrogram(
+        xx=xx_cooled_cut,
+        yy=yy_cooled_cut,
+        zz=zz_cooled_cut,
+        every=avg_every
+    )
+
+    return xx_avg, yy_avg, zz_avg
 
 
+# Adds all of the time frames of the averaged spectrogram, producing a 2d spectrum
+# Returns a 1d array of x-values and a 1d array of intensities
+def get_spectrum(xx: np.ndarray, zz: np.ndarray):
+    zz_sum = np.zeros(np.shape(xx[0]))
+    for i in range(len(zz)):
+        zz_sum += zz[i]
 
-def main():
-    # run all the functions
+    zz_log = np.log10(zz_sum)
+    xvals = xx[0]
+
+    return xvals, zz_log
 
 
-    file_index = 0
-    
-    file_list = get_files()
-    sly, slx = get_slices()
+# Checks the peak and reference areas specified in the config to look for a peak
+def find_ion(zz: np.ndarray, peak_start: int, peak_end: int, ref_start: int, ref_end: int, peak_criterion: float) -> bool:
+    print(f"Bins in peak area: {peak_end-peak_start}")
+    peak_integral = sum(zz[peak_start:peak_end])
+    peak_avg = peak_integral / (peak_end - peak_start)
+    print(f"Integral of peak area {peak_integral}")
+    print(f"Average of peak area: {peak_avg}")
 
-    for file in range(len(file_list)):
-        xx_orig, yy_orig, zz_orig, filename = load_file(
-            file_list=file_list,
-            file_index=file_index,
-            sly=sly,
-            slx=slx
+    print(f"Bins in reference area: {ref_end-ref_start}")
+    ref_integral = sum(zz[ref_start:ref_end])
+    ref_avg = ref_integral / (ref_end - ref_start)
+    print(f"Integral of reference area {ref_integral}")
+    print(f"Average of reference area: {ref_avg}")
+
+    diff = peak_avg - ref_avg
+    print(f"Difference between peak and reference: {diff}")
+
+    if diff >= peak_criterion:
+        outcome = True
+    else:
+        outcome = False
+
+    return outcome
+
+
+def save_info(xx: np.ndarray, zz: np.ndarray, filename: str, found_peaks_output_path: str, spectra_output_path: str) -> None:
+    with open(found_peaks_output_path + "single-ions.txt", "a") as f:
+        # write the name of the file where the single ion was found to a new line
+        # in a text file 
+        f.write(filename + "\n")
+
+    fig, ax = plt.subplots(figsize=(16,10))
+    plt.stairs(
+        values=zz[:-1],
+        edges=xx
+    )
+    plt.vlines(
+    x=xx[ref_start],
+    ymin=min(zz),
+    ymax=max(zz),
+    color="r",
+    linestyles="dashed"
+    )
+    plt.vlines(
+    x=xx[ref_end],
+    ymin=min(zz),
+    ymax=max(zz),
+    color="r",
+    linestyles="dashed"
+    )
+    plt.vlines(
+    x=xx[peak_start],
+    ymin=min(zz),
+    ymax=max(zz),
+    color="g",
+    linestyles="dashed"
+    )
+    plt.vlines(
+    x=xx[peak_end],
+    ymin=min(zz),
+    ymax=max(zz),
+    color="g",
+    linestyles="dashed"
+    )    
+    plt.savefig(spectra_output_path + filename + ".png")
+    plt.close()
+
+
+def process_file(file_list: list, file_index: int) -> None:
+    sly, slx = get_2d_slices()
+
+    xx_orig, yy_orig, zz_orig, filename = load_file(file_list, file_index)
+
+    xx_avg, yy_avg, zz_avg = process_spectrograms(
+        xx=xx_orig,
+        yy=yy_orig,
+        zz=zz_orig,
+        sly=sly,
+        slx=slx
+    )
+
+    xvals, zz_log = get_spectrum(
+        xx=xx_avg,
+        zz=zz_avg
+    )
+
+    ion_present = find_ion(
+        zz=zz_log,
+        peak_start=peak_start,
+        peak_end=peak_end,
+        ref_start=ref_start,
+        ref_end=ref_end,
+        peak_criterion=peak_criterion
+    )
+
+    print(f"Ion detected: {ion_present}")
+
+    if ion_present:
+        save_info(
+            xx=xvals,
+            zz=zz_log,
+            filename=filename,
+            found_peaks_output_path=found_peaks_output_path,
+            spectra_output_path=spectra_output_path
         )
 
-        logger.info(f"xx_orig shape: {np.shape(xx_orig)}")
-        logger.info(f"yy_orig shape: {np.shape(yy_orig)}")
-        logger.info(f"zz_orig shape: {np.shape(zz_orig)}")
 
-        xx_cooled, yy_cooled, zz_cooled = tools.get_cooled_spectrogram(
-            xx=xx_orig,
-            yy=yy_orig,
-            zz=zz_orig,
-            yy_idx=nframes-(sframes+2)
-        )
+def main() -> None:
+    files = get_files()
 
-        logger.info(f"xx_cooled shape: {np.shape(xx_cooled)}")
-        logger.info(f"yy_cooled shape: {np.shape(yy_cooled)}")
-        logger.info(f"zz_cooled shape: {np.shape(zz_cooled)}")
-
-        xx_avg, yy_avg, zz_avg = tools.get_averaged_spectrogram(
-            xx=xx_cooled,
-            yy=yy_cooled,
-            zz=zz_cooled,
-            every=avg_every
-        )
-
-        logger.info(f"xx_avg shape: {np.shape(xx_avg)}")
-        logger.info(f"yy_avg shape: {np.shape(yy_avg)}")
-        logger.info(f"zz_avg shape: {np.shape(zz_avg)}")
-
-        zz_sum = np.zeros(np.shape(xx_avg)[1])
-        for i in range(len(zz_avg)):
-            zz_sum += zz_avg[i]
-
-        log_zz_sum = np.log10(zz_sum)
-
-        ref_integral = sum(log_zz_sum[ref_start:ref_end])
-        peak_integral = sum(log_zz_sum[peak_start:peak_end])
-
-        ref_avg = ref_integral / (ref_end - ref_start)
-        peak_avg = peak_integral / (peak_end - peak_start)
-
-        if peak_avg - ref_avg > peak_criterion:
-            # record filename to textfile and save spectra
-            
-            with open(found_peaks_output_path + "single-ions.txt", "a") as f:
-                f.write(filename)
-
-            fig, ax = plt.subplots(figsize=(16,10))
-            plt.stairs(log_zz_sum[:-1], xx_avg[:])
-            plt.savefig(spectra_output_path + filename + ".png")
-            plt.close()
+    for i in range(len(files)):
+        process_file(files, i)
+        time.sleep(0.5)
 
 
-
-
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
